@@ -5,10 +5,6 @@ param tags object = {}
 param keyVaultName string
 @description('Name of the storage account')
 param storageAccountName string
-@description('Name of the AI Service')
-param aiServicesName string
-@description('Array of OpenAI model deployments')
-param aiServiceModelDeployments array = []
 @description('Name of the Log Analytics workspace')
 param logAnalyticsName string = ''
 @description('Name of the Application Insights instance')
@@ -124,16 +120,7 @@ module containerRegistry '../host/container-registry.bicep' =
     }
   }
 
-module cognitiveServices '../ai/cognitiveservices.bicep' = {
-  name: 'cognitiveServices'
-  params: {
-    location: location
-    tags: tags
-    name: aiServicesName
-    kind: 'AIServices'
-    deployments: aiServiceModelDeployments
-  }
-}
+
 
 module searchService '../search/search-services.bicep' =
   if (!empty(searchServiceName)) {
@@ -142,8 +129,8 @@ module searchService '../search/search-services.bicep' =
       location: location
       tags: tags
       name: searchServiceName
-    }
   }
+}
 
 output keyVaultId string = keyVault.outputs.id
 output keyVaultName string = keyVault.outputs.name
@@ -160,10 +147,6 @@ output applicationInsightsId string = !empty(applicationInsightsName) ? applicat
 output applicationInsightsName string = !empty(applicationInsightsName) ? applicationInsights.outputs.name : ''
 output logAnalyticsWorkspaceId string = !empty(logAnalyticsName) ? logAnalytics.outputs.id : ''
 output logAnalyticsWorkspaceName string = !empty(logAnalyticsName) ? logAnalytics.outputs.name : ''
-
-output aiServiceId string = cognitiveServices.outputs.id
-output aiServicesName string = cognitiveServices.outputs.name
-output aiServiceEndpoint string = cognitiveServices.outputs.endpoints['OpenAI Language Model Instance API']
 
 output searchServiceId string = !empty(searchServiceName) ? searchService.outputs.id : ''
 output searchServiceName string = !empty(searchServiceName) ? searchService.outputs.name : ''

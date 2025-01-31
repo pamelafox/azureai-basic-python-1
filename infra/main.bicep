@@ -32,6 +32,7 @@ param environmentName string
   'westeurope'
   'westus'
   'westus3'
+  'westcentralus'
 ])
 @metadata({
   azd: {
@@ -50,12 +51,7 @@ param aiHubName string = ''
 param aiProjectName string = ''
 @description('The application insights resource name. If ommited will be generated')
 param applicationInsightsName string = ''
-@description('The AI Services resource name. If ommited will be generated')
-param aiServicesName string = ''
-@description('The AI Services connection name. If ommited will use a default value')
-param aiServicesConnectionName string = ''
-@description('The AI Services content safety connection name. If ommited will use a default value')
-param aiServicesContentSafetyConnectionName string = ''
+
 @description('The Azure Container Registry resource name. If ommited will be generated')
 param containerRegistryName string = ''
 @description('The Azure Key Vault resource name. If ommited will be generated')
@@ -71,53 +67,6 @@ param logAnalyticsWorkspaceName string = ''
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
 
-// Chat completion model
-@description('Format of the chat model to deploy')
-@allowed(['Microsoft', 'OpenAI'])
-param chatModelFormat string
-
-@description('Name of the chat model to deploy')
-param chatModelName string
-@description('Name of the model deployment')
-param chatDeploymentName string
-
-@description('Version of the chat model to deploy')
-// See version availability in this table:
-// https://learn.microsoft.com/azure/ai-services/openai/concepts/models#global-standard-model-availability
-param chatModelVersion string
-
-@description('Sku of the chat deployment')
-param chatDeploymentSku string
-
-@description('Capacity of the chat deployment')
-// You can increase this, but capacity is limited per model/region, so you will get errors if you go over
-// https://learn.microsoft.com/en-us/azure/ai-services/openai/quotas-limits
-param chatDeploymentCapacity int
-
-// Embedding model
-@description('Format of the embedding model to deploy')
-@allowed(['Microsoft', 'OpenAI'])
-param embedModelFormat string
-
-@description('Name of the embedding model to deploy')
-param embedModelName string
-@description('Name of the embedding model deployment')
-param embedDeploymentName string
-
-@description('Version of the embedding model to deploy')
-// See version availability in this table:
-// https://learn.microsoft.com/azure/ai-services/openai/concepts/models#embeddings-models
-@secure()
-param embedModelVersion string
-
-@description('Sku of the embeddings model deployment')
-param embedDeploymentSku string
-
-@description('Capacity of the embedding deployment')
-// You can increase this, but capacity is limited per model/region, so you will get errors if you go over
-// https://learn.microsoft.com/azure/ai-services/openai/quotas-limits
-param embedDeploymentCapacity int
-
 param useContainerRegistry bool = true
 param useApplicationInsights bool = true
 param useSearch bool = false
@@ -127,35 +76,7 @@ var resourceToken = toLower(uniqueString(subscription().id, environmentName, loc
 var projectName = !empty(aiProjectName) ? aiProjectName : 'ai-project-${resourceToken}'
 var tags = { 'azd-env-name': environmentName }
 
-var aiDeployments = [
-  {
-    name: chatDeploymentName
-    model: {
-      format: chatModelFormat
-      name: chatModelName
-      version: chatModelVersion
-    }
-    sku: {
-      name: chatDeploymentSku
-      capacity: chatDeploymentCapacity
-    }
-  }
-  {
-    name: embedDeploymentName
-    model: {
-      format: embedModelFormat
-      name: embedModelName
-      version: embedModelVersion
-    }
-    sku: {
-      name: embedDeploymentSku
-      capacity: embedDeploymentCapacity
-    }
-  }
-]
-
 //for container and app api
-param apiAppExists bool = false
 
 // Organize resources in a resource group
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
@@ -186,12 +107,6 @@ module ai 'core/host/ai-environment.bicep' = if (empty(aiExistingProjectConnecti
     storageAccountName: !empty(storageAccountName)
       ? storageAccountName
       : '${abbrs.storageStorageAccounts}${resourceToken}'
-    aiServicesName: !empty(aiServicesName) ? aiServicesName : 'aoai-${resourceToken}'
-    aiServicesConnectionName: !empty(aiServicesConnectionName) ? aiServicesConnectionName : 'aoai-${resourceToken}'
-    aiServicesContentSafetyConnectionName: !empty(aiServicesContentSafetyConnectionName)
-      ? aiServicesContentSafetyConnectionName
-      : 'aoai-content-safety-connection'
-    aiServiceModelDeployments: aiDeployments
     logAnalyticsName: logAnalyticsWorkspaceResolvedName
     applicationInsightsName: !useApplicationInsights
       ? ''
@@ -203,6 +118,15 @@ module ai 'core/host/ai-environment.bicep' = if (empty(aiExistingProjectConnecti
     searchConnectionName: !useSearch
       ? ''
       : !empty(searchConnectionName) ? searchConnectionName : 'search-service-connection'
+  }
+}
+
+module deepseekModel 'model.bicep' = {
+  name: 'deepseek-model2'
+  scope: rg
+  params: {
+    location: 'westus3'
+    projectName: ai.outputs.projectName
   }
 }
 
@@ -267,77 +191,10 @@ module userRoleAzureAIDeveloper 'core/security/role.bicep' = if (!empty(principa
   }
 }
 
-module backendRoleAzureAIDeveloperRG 'core/security/role.bicep' = {
-  name: 'backend-role-azureai-developer-rg'
-  scope: rg
-  params: {
-    principalId: api.outputs.SERVICE_API_IDENTITY_PRINCIPAL_ID
-    roleDefinitionId: '64702f94-c441-49e6-a78b-ef80e0188fee'
-  }
-}
 
-resource existingProjectRG 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(aiExistingProjectConnectionString)) {
-  name: split(aiExistingProjectConnectionString, ';')[2]
-}
-
-module userRoleAzureAIDeveloperBackendExistingProjectRG 'core/security/role.bicep' = if (!empty(aiExistingProjectConnectionString)) {
-  name: 'backend-role-azureai-developer-existing-project-rg'
-  scope: existingProjectRG
-  params: {
-    principalId: api.outputs.SERVICE_API_IDENTITY_PRINCIPAL_ID
-    roleDefinitionId: '64702f94-c441-49e6-a78b-ef80e0188fee'
-  }
-}
-
-//Container apps host and api
-// Container apps host (including container registry)
-module containerApps 'core/host/container-apps.bicep' = {
-  name: 'container-apps'
-  scope: rg
-  params: {
-    name: 'app'
-    location: location
-    tags: tags
-    containerAppsEnvironmentName: 'containerapps-env-${resourceToken}'
-    containerRegistryName: empty(aiExistingProjectConnectionString)
-      ? ai.outputs.containerRegistryName
-      : containerRegistryResolvedName
-    logAnalyticsWorkspaceName: empty(aiExistingProjectConnectionString)
-      ? ai.outputs.logAnalyticsWorkspaceName
-      : logAnalytics.outputs.name
-  }
-}
-
-// API app
-module api 'api.bicep' = {
-  name: 'api'
-  scope: rg
-  params: {
-    name: 'ca-api-${resourceToken}'
-    location: location
-    tags: tags
-    identityName: '${abbrs.managedIdentityUserAssignedIdentities}api-${resourceToken}'
-    containerAppsEnvironmentName: containerApps.outputs.environmentName
-    containerRegistryName: containerApps.outputs.registryName
-    projectConnectionString: projectConnectionString
-    chatDeploymentName: chatDeploymentName
-    exists: apiAppExists
-  }
-}
 
 output AZURE_RESOURCE_GROUP string = rg.name
 
 // Outputs required for local development server
 output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_AIPROJECT_CONNECTION_STRING string = projectConnectionString
-output AZURE_AI_CHAT_DEPLOYMENT_NAME string = chatDeploymentName
-
-// Outputs required by azd for ACA
-output AZURE_CONTAINER_ENVIRONMENT_NAME string = containerApps.outputs.environmentName
-output AZURE_CONTAINER_REGISTRY_NAME string = containerApps.outputs.registryName
-output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerApps.outputs.registryLoginServer
-output SERVICE_API_IDENTITY_PRINCIPAL_ID string = api.outputs.SERVICE_API_IDENTITY_PRINCIPAL_ID
-output SERVICE_API_NAME string = api.outputs.SERVICE_API_NAME
-output SERVICE_API_URI string = api.outputs.SERVICE_API_URI
-output SERVICE_API_IMAGE_NAME string = api.outputs.SERVICE_API_IMAGE_NAME
-output SERVICE_API_ENDPOINTS array = ['${api.outputs.SERVICE_API_URI}']

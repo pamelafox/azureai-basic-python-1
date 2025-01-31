@@ -3,8 +3,6 @@ param location string = resourceGroup().location
 param tags object = {}
 
 param identityName string
-param containerAppsEnvironmentName string
-param containerRegistryName string
 param serviceName string = 'api'
 param exists bool
 param projectConnectionString string
@@ -42,8 +40,6 @@ module app 'core/host/container-app-upsert.bicep' = {
     tags: union(tags, { 'azd-service-name': serviceName })
     identityName: apiIdentity.name
     exists: exists
-    containerAppsEnvironmentName: containerAppsEnvironmentName
-    containerRegistryName: containerRegistryName
     targetPort: 50505
     env: env
   }
